@@ -73,7 +73,13 @@ public class WebRTCTest : MonoBehaviour
 
         pc.OnIceCandidate = candidate =>
         {
-            if (candidate == null) return;
+            if (candidate == null)
+            {
+                Debug.Log("ICE gathering completed (null candidate received)");
+                return;
+            }
+
+            Debug.Log($"Unity ICE candidate: {candidate.Candidate}");
 
             IceCandidateMessage msg = new IceCandidateMessage()
             {
@@ -92,6 +98,11 @@ public class WebRTCTest : MonoBehaviour
         pc.OnIceConnectionChange = state =>
         {
             Debug.Log("ICE connection state changed: " + state);
+        };
+
+        pc.OnConnectionStateChange = state =>
+        {
+            Debug.Log("Peer Connection State: " + state);
         };
 
         Debug.Log("Creating DataChannel...");
@@ -193,16 +204,9 @@ public class WebRTCTest : MonoBehaviour
 
     private RTCConfiguration GetSelectedSdpSemantics()
     {
-        return new RTCConfiguration
-        {
-            iceServers = new[]
-            {
-                new RTCIceServer
-                {
-                    urls = new[] { "stun:stun.l.google.com:19302" }
-                }
-            }
-        };
+        RTCConfiguration config = default;
+        config.iceServers = new RTCIceServer[] {}; // 空にする
+        return config;
     }
 
     void Update()
