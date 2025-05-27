@@ -144,25 +144,58 @@ public class WebRTCTest : MonoBehaviour
         if (message.StartsWith("sdp:"))
         {
             string sdpJson = message.Substring(4);
-            Debug.Log("Received SDP message");
+            Debug.Log("Received SDP message: " + sdpJson);
 
-            var desc = JsonUtility.FromJson<RTCSessionDescription>(sdpJson);
+            // SdpMessageクラスを使ってデシリアライズ
+            var sdpMsg = JsonUtility.FromJson<SdpMessage>(sdpJson);
+            
+            // RTCSessionDescriptionを正しく構築
+            RTCSessionDescription desc = new RTCSessionDescription();
+            
+            // 文字列からRTCSdpTypeに変換
+            if (sdpMsg.type.ToLower() == "offer")
+                desc.type = RTCSdpType.Offer;
+            else if (sdpMsg.type.ToLower() == "answer")
+                desc.type = RTCSdpType.Answer;
+            else if (sdpMsg.type.ToLower() == "pranswer")
+                desc.type = RTCSdpType.Pranswer;
+            else if (sdpMsg.type.ToLower() == "rollback")
+                desc.type = RTCSdpType.Rollback;
+                
+            desc.sdp = sdpMsg.sdp;
 
-            Debug.Log("Setting remote description...");
+            Debug.Log($"Setting remote description (type: {desc.type})...");
             var remoteOp = pc.SetRemoteDescription(ref desc);
             yield return remoteOp;
-            Debug.Log("Remote description set");
+            
+            if (remoteOp.IsError)
+            {
+                Debug.LogError("SetRemoteDescription failed: " + remoteOp.Error.message);
+            }
+            else
+            {
+                Debug.Log("Remote description set successfully");
+            }
         }
         else if (message.StartsWith("ice:"))
         {
             string iceJson = message.Substring(4);
             Debug.Log("Received ICE candidate: " + iceJson);
 
-            var ice = JsonUtility.FromJson<RTCIceCandidateInit>(iceJson);
+            // IceCandidateMessageクラスを使用
+            var ice = JsonUtility.FromJson<IceCandidateMessage>(iceJson);
+            
+            RTCIceCandidateInit candidateInit = new RTCIceCandidateInit
+            {
+                candidate = ice.candidate,
+                sdpMid = ice.sdpMid,
+                sdpMLineIndex = ice.sdpMLineIndex
+            };
+            
             try
             {
-                pc.AddIceCandidate(new RTCIceCandidate(ice));
-                Debug.Log("Added ICE candidate");
+                pc.AddIceCandidate(new RTCIceCandidate(candidateInit));
+                Debug.Log("Added ICE candidate successfully");
             }
             catch (Exception ex)
             {
