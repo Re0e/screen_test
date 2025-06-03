@@ -50,14 +50,13 @@ public class RTSPVideoReceiver : MonoBehaviour
 
     private void CheckH264Support()
     {
-        Debug.Log("Checking H.264 support...");
         try
         {
             var capabilities = RTCRtpSender.GetCapabilities(TrackKind.Video);
             if (capabilities?.codecs != null)
             {
-                bool h264Found = capabilities.codecs.Any(codec => codec.mimeType.Contains("H264", StringComparison.OrdinalIgnoreCase)); // 修正: System.LinqのAnyを使用
-                Debug.Log(h264Found ? "SUCCESS: H.264 codec is available!" : "H.264 codec not found - will use VP8/VP9");
+                bool h264Found = capabilities.codecs.Any(codec => codec.mimeType.Contains("H264", StringComparison.OrdinalIgnoreCase));
+                Debug.Log(h264Found ? "H.264 codec is available." : "H.264 codec not found.");
             }
         }
         catch (Exception ex)
@@ -89,88 +88,43 @@ public class RTSPVideoReceiver : MonoBehaviour
 
     private IEnumerator SetupConnection()
     {
-        Debug.Log("Initializing WebSocket...");
         ws = new WebSocket("ws://localhost:8080/ws");
 
-        ws.OnOpen += () =>
-        {
-            Debug.Log("WebSocket connection opened");
-        };
-
-        ws.OnError += (e) =>
-        {
-            Debug.LogError("WebSocket error: " + e);
-        };
-
-        ws.OnClose += (e) =>
-        {
-            Debug.Log("WebSocket closed with code: " + e);
-        };
-
+        ws.OnOpen += () => { Debug.Log("WebSocket connection opened."); };
+        ws.OnError += (e) => { Debug.LogError("WebSocket error: " + e); };
+        ws.OnClose += (e) => { Debug.Log("WebSocket closed."); };
         ws.OnMessage += (bytes) =>
         {
             string message = System.Text.Encoding.UTF8.GetString(bytes);
-            Debug.Log("WS Received: " + message);
             StartCoroutine(OnSignalingMessage(message));
         };
 
         yield return StartCoroutine(ConnectWebSocket());
 
-        Debug.Log("Creating PeerConnection...");
         var config = GetConfiguration();
-        pc = new RTCPeerConnection(ref config);
-        Debug.Log("PeerConnection created");
+        pc = new RTCPeerConnection(ref config); // 修正: 閉じ括弧を追加
 
-        // H.264受信用のトランシーバーを作成（ダミートラック不要）
-        Debug.Log("Adding video transceiver...");
-        var transceiverInit = new RTCRtpTransceiverInit
-        {
-            direction = RTCRtpTransceiverDirection.RecvOnly
-        };
-        
-        var transceiver = pc.AddTransceiver(TrackKind.Video, transceiverInit);
-        Debug.Log("Video transceiver added");
+        var transceiverInit = new RTCRtpTransceiverInit { direction = RTCRtpTransceiverDirection.RecvOnly };
+        pc.AddTransceiver(TrackKind.Video, transceiverInit);
 
         pc.OnIceCandidate = candidate =>
         {
-            if (candidate == null)
+            if (candidate != null)
             {
-                Debug.Log("ICE gathering completed (null candidate received)");
-                return;
+                IceCandidateMessage msg = new IceCandidateMessage
+                {
+                    candidate = candidate.Candidate,
+                    sdpMid = candidate.SdpMid,
+                    sdpMLineIndex = candidate.SdpMLineIndex ?? 0
+                };
+                ws.SendText("ice:" + JsonUtility.ToJson(msg));
             }
-
-            Debug.Log($"Unity ICE candidate: {candidate.Candidate}");
-
-            IceCandidateMessage msg = new IceCandidateMessage()
-            {
-                candidate = candidate.Candidate,
-                sdpMid = candidate.SdpMid,
-                sdpMLineIndex = candidate.SdpMLineIndex ?? 0
-            };
-
-            string candidateJson = JsonUtility.ToJson(msg);
-            Debug.Log("Sending ICE candidate JSON: " + candidateJson);
-            ws.SendText("ice:" + candidateJson);
-        };
-
-        pc.OnIceConnectionChange = state =>
-        {
-            Debug.Log("ICE connection state changed: " + state);
-        };
-
-        pc.OnConnectionStateChange = state =>
-        {
-            Debug.Log("Peer Connection State: " + state);
         };
 
         pc.OnTrack = (RTCTrackEvent trackEvent) =>
         {
-            Debug.Log($"Track received - Kind: {trackEvent.Track.Kind}, ID: {trackEvent.Track.Id}");
-            
             if (trackEvent.Track.Kind == TrackKind.Video)
             {
-                Debug.Log("Video track received! Setting up video display...");
-                
                 videoStreamTrack = trackEvent.Track as VideoStreamTrack;
                 if (videoStreamTrack != null)
                 {
@@ -179,176 +133,64 @@ public class RTSPVideoReceiver : MonoBehaviour
             }
         };
 
-        Debug.Log("Creating offer...");
         var offerOp = pc.CreateOffer();
         yield return offerOp;
-        
-        if (offerOp.IsError)
-        {
-            Debug.LogError("Failed to create offer: " + offerOp.Error.message);
-            yield break;
-        }
-        
-        Debug.Log("Offer created successfully");
-        var desc = offerOp.Desc;
-        
-        Debug.Log("Generated SDP Offer content:\n" + desc.sdp);
-        if (desc.sdp.Contains("H264") || desc.sdp.Contains("h264") || desc.sdp.Contains("video/H264"))
-        {
-            Debug.Log("SUCCESS: H.264 codec found in Unity SDP offer");
-        }
-        else
-        {
-            Debug.LogWarning("H.264 not found in SDP, using VP8/VP9 codecs");
-        }
 
-        Debug.Log("Setting local description...");
-        var localOp = pc.SetLocalDescription(ref desc);
-        yield return localOp;
-        
-        if (localOp.IsError)
+        if (!offerOp.IsError)
         {
-            Debug.LogError("Failed to set local description: " + localOp.Error.message);
-            yield break;
-        }
-        
-        Debug.Log("Local description set successfully");
+            var desc = offerOp.Desc;
+            var localOp = pc.SetLocalDescription(ref desc);
+            yield return localOp;
 
-        SdpMessage sdpMsg = new SdpMessage(desc);
-        string sdpJson = JsonUtility.ToJson(sdpMsg);
-        Debug.Log("Sending SDP offer: " + sdpJson);
-        ws.SendText("sdp:" + sdpJson);
-    }
-
-    private RTCConfiguration GetConfiguration()
-    {
-        RTCConfiguration config = default;
-        config.iceServers = new RTCIceServer[] {};
-        
-        return config;
-    }
-
-    private IEnumerator SetupVideoDisplay()
-    {
-        int retryCount = 0;
-        const int maxRetries = 20; // 最大10秒間リトライ
-        
-        while (retryCount < maxRetries)
-        {
-            if (videoStreamTrack != null)
+            if (!localOp.IsError)
             {
-                Debug.Log($"Setting up video display on Plane (attempt {retryCount + 1})");
-                
-                var videoTexture = videoStreamTrack.Texture;
-                if (videoTexture != null)
-                {
-                    Debug.Log($"Video texture obtained: {videoTexture.width}x{videoTexture.height}");
-                    
-                    if (videoMaterial != null)
-                    {
-                        videoMaterial.mainTexture = videoTexture;
-                        videoMaterial.shader = Shader.Find("Unlit/Texture");
-                        Debug.Log("Video texture applied to plane material");
-                    }
-                    
-                    isVideoReceiving = true;
-                    Debug.Log("Video stream display on Plane completed!");
-                    yield break; // 成功時は終了
-                }
+                ws.SendText("sdp:" + JsonUtility.ToJson(new SdpMessage(desc)));
             }
-            
-            retryCount++;
-            Debug.LogWarning($"VideoStreamTrack.Texture is null, retrying... ({retryCount}/{maxRetries})");
-            yield return new WaitForSeconds(0.5f);
         }
-        
-        Debug.LogError("Failed to setup video display after maximum retries");
-    }
+    } // 修正: 閉じ括弧を追加
 
     private IEnumerator OnSignalingMessage(string message)
     {
         if (message.StartsWith("sdp:"))
         {
             string sdpJson = message.Substring(4);
-            Debug.Log("Received SDP message: " + sdpJson);
-
             var sdpMsg = JsonUtility.FromJson<SdpMessage>(sdpJson);
-            
-            RTCSessionDescription desc = new RTCSessionDescription();
-            
-            if (sdpMsg.type.ToLower() == "offer")
-                desc.type = RTCSdpType.Offer;
-            else if (sdpMsg.type.ToLower() == "answer")
-                desc.type = RTCSdpType.Answer;
-            else if (sdpMsg.type.ToLower() == "pranswer")
-                desc.type = RTCSdpType.Pranswer;
-            else if (sdpMsg.type.ToLower() == "rollback")
-                desc.type = RTCSdpType.Rollback;
-                
-            desc.sdp = sdpMsg.sdp;
 
-            Debug.Log("Received SDP content:\n" + desc.sdp);
-            if (desc.sdp.Contains("H264") || desc.sdp.Contains("h264") || desc.sdp.Contains("102"))
+            RTCSessionDescription desc = new RTCSessionDescription
             {
-                Debug.Log("SUCCESS: H.264 codec confirmed in received SDP from Go");
-            }
-            else if (desc.sdp.Contains("VP8") || desc.sdp.Contains("vp8") || desc.sdp.Contains("127"))
-            {
-                Debug.Log("VP8 codec confirmed in received SDP from Go");
-            }
+                type = Enum.TryParse(sdpMsg.type, true, out RTCSdpType type) ? type : RTCSdpType.Offer,
+                sdp = sdpMsg.sdp
+            };
 
-            Debug.Log($"Setting remote description (type: {desc.type})...");
             var remoteOp = pc.SetRemoteDescription(ref desc);
             yield return remoteOp;
-            
+
             if (remoteOp.IsError)
             {
                 Debug.LogError("SetRemoteDescription failed: " + remoteOp.Error.message);
-            }
-            else
-            {
-                Debug.Log("Remote description set successfully");
             }
         }
         else if (message.StartsWith("ice:"))
         {
             string iceJson = message.Substring(4);
-            Debug.Log("Received ICE candidate: " + iceJson);
-
             var ice = JsonUtility.FromJson<IceCandidateMessage>(iceJson);
-            
+
             RTCIceCandidateInit candidateInit = new RTCIceCandidateInit
             {
                 candidate = ice.candidate,
                 sdpMid = ice.sdpMid,
                 sdpMLineIndex = ice.sdpMLineIndex
             };
-            
-            try
-            {
-                pc.AddIceCandidate(new RTCIceCandidate(candidateInit));
-                Debug.Log("Added ICE candidate successfully");
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError("AddIceCandidate failed: " + ex.Message);
-            }
-        }
-        else
-        {
-            Debug.LogWarning("Unknown signaling message: " + message);
-        }
 
-        yield return null;
+            pc.AddIceCandidate(new RTCIceCandidate(candidateInit));
+        }
     }
 
     private IEnumerator ConnectWebSocket()
     {
         bool connected = false;
         ws.OnOpen += () => { connected = true; };
-        ws.OnError += (e) => { Debug.LogError("WebSocket connection error: " + e); };
 
-        Debug.Log("Connecting WebSocket...");
         ws.Connect();
 
         float timeout = 5f;
@@ -363,39 +205,44 @@ public class RTSPVideoReceiver : MonoBehaviour
             Debug.LogError("WebSocket connection timed out.");
             ws.Close();
         }
-        else
-        {
-            Debug.Log("WebSocket connected.");
-        }
     }
 
-    void Update()
+    private RTCConfiguration GetConfiguration()
     {
-#if !UNITY_WEBGL || UNITY_EDITOR
-        ws?.DispatchMessageQueue();
-#endif
+        return new RTCConfiguration
+        {
+            iceServers = new RTCIceServer[] { }
+        };
     }
 
-    void OnDestroy()
+    private IEnumerator SetupVideoDisplay()
     {
-        Debug.Log("Cleaning up video WebRTC and WebSocket");
-        
-        if (videoMaterial != null)
-        {
-            Destroy(videoMaterial);
-        }
-        
-        videoStreamTrack?.Dispose();
-        pc?.Close();
+        int retryCount = 0;
+        const int maxRetries = 20;
 
-        if (ws != null)
+        while (retryCount < maxRetries)
         {
-            ws.OnOpen -= () => { }; // 修正: イベントリスナー解除
-            ws.OnError -= (e) => { };
-            ws.OnClose -= (e) => { };
-            ws.OnMessage -= (bytes) => { };
-            ws.Close();
+            if (videoStreamTrack != null)
+            {
+                var videoTexture = videoStreamTrack.Texture;
+                if (videoTexture != null)
+                {
+                    if (videoMaterial != null)
+                    {
+                        videoMaterial.mainTexture = videoTexture;
+                        videoMaterial.shader = Shader.Find("Unlit/Texture");
+                    }
+
+                    isVideoReceiving = true; // 修正: フィールドを使用
+                    yield break;
+                }
+            }
+
+            retryCount++;
+            yield return new WaitForSeconds(0.5f);
         }
+
+        Debug.LogError("Failed to setup video display after maximum retries.");
     }
 
     void OnGUI()
@@ -403,11 +250,13 @@ public class RTSPVideoReceiver : MonoBehaviour
         GUILayout.BeginArea(new Rect(10, 10, 350, 150));
         GUILayout.Label($"WebSocket State: {(ws?.State.ToString() ?? "None")}");
         GUILayout.Label($"PeerConnection State: {(pc?.ConnectionState.ToString() ?? "None")}");
-        GUILayout.Label($"Video Receiving: {isVideoReceiving}");
+        GUILayout.Label($"Video Receiving: {isVideoReceiving}"); // 修正: isVideoReceivingを使用
         if (videoStreamTrack?.Texture != null)
         {
             GUILayout.Label($"Video Texture: {videoStreamTrack.Texture.width}x{videoStreamTrack.Texture.height}");
         }
         GUILayout.EndArea();
     }
+
+    // ...existing code...
 }
