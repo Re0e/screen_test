@@ -48,21 +48,27 @@ public class RTSPVideoReceiver : MonoBehaviour
         StartCoroutine(SetupConnection());
     }
 
-    void Update()
+   void Update()
     {
         ws?.DispatchMessageQueue();
         
-        // ビデオテクスチャの更新を強制的にチェック
+        // より頻繁にテクスチャをチェック
         if (videoStreamTrack != null && !isVideoReceiving)
         {
             var texture = videoStreamTrack.Texture;
-            if (texture != null && videoMaterial != null && videoMaterial.mainTexture == null)
+            if (texture != null && videoMaterial != null)
             {
-                Debug.Log("Late texture detection - applying now!");
+                Debug.Log($"Late texture detection in Update! Size: {texture.width}x{texture.height}");
                 videoMaterial.mainTexture = texture;
                 videoMaterial.shader = Shader.Find("Unlit/Texture");
                 isVideoReceiving = true;
             }
+        }
+        
+        // デバッグ情報を定期的に出力
+        if (Time.frameCount % 300 == 0 && videoStreamTrack != null && !isVideoReceiving)
+        {
+            Debug.Log($"Debug: VideoStreamTrack.Enabled={videoStreamTrack.Enabled}, ReadyState={videoStreamTrack.ReadyState}, Texture={videoStreamTrack.Texture}");
         }
     }
 
@@ -110,6 +116,31 @@ public class RTSPVideoReceiver : MonoBehaviour
         yield return new WaitForSeconds(2.0f); // 修正: 待機時間を1秒から2秒に増加
         yield return StartCoroutine(SetupVideoDisplay());
     }
+    
+    private IEnumerator MonitorVideoTexture()
+    {
+        Debug.Log("Starting video texture monitoring...");
+        
+        while (!isVideoReceiving && videoStreamTrack != null)
+        {
+            var texture = videoStreamTrack.Texture;
+            if (texture != null)
+            {
+                Debug.Log($"Texture detected in monitor! Size: {texture.width}x{texture.height}"); // 修正: formatを削除
+                
+                if (videoMaterial != null)
+                {
+                    videoMaterial.mainTexture = texture;
+                    videoMaterial.shader = Shader.Find("Unlit/Texture");
+                    isVideoReceiving = true;
+                    Debug.Log("Video texture applied successfully in monitor!");
+                }
+                yield break;
+            }
+            
+            yield return new WaitForSeconds(0.1f);
+        }
+    }
 
     private IEnumerator SetupConnection()
     {
@@ -149,17 +180,20 @@ public class RTSPVideoReceiver : MonoBehaviour
         pc.OnTrack = (RTCTrackEvent trackEvent) =>
         {
             Debug.Log($"Track received - Kind: {trackEvent.Track.Kind}, ID: {trackEvent.Track.Id}");
-            
+
             if (trackEvent.Track.Kind == TrackKind.Video)
             {
                 videoStreamTrack = trackEvent.Track as VideoStreamTrack;
                 Debug.Log("Video track received! Setting up video display...");
-                
+
                 if (videoStreamTrack != null)
                 {
                     Debug.Log($"VideoStreamTrack details - Enabled: {videoStreamTrack.Enabled}, ReadyState: {videoStreamTrack.ReadyState}");
-                    
-                    // テクスチャの更新を待つために少し遅延を追加
+
+                    // テクスチャの更新を監視するコルーチンを開始
+                    StartCoroutine(MonitorVideoTexture());
+
+                    // 少し遅延してからセットアップを開始
                     StartCoroutine(WaitAndSetupVideoDisplay());
                 }
             }
@@ -250,50 +284,47 @@ public class RTSPVideoReceiver : MonoBehaviour
     private IEnumerator SetupVideoDisplay()
     {
         int retryCount = 0;
-        const int maxRetries = 30; // 修正: 最大リトライ回数を20から30に増加
+        const int maxRetries = 100; // リトライ回数をさらに増やす
         
         Debug.Log($"Starting SetupVideoDisplay - VideoStreamTrack: {videoStreamTrack != null}");
 
-        while (retryCount < maxRetries)
+        while (retryCount < maxRetries && !isVideoReceiving)
         {
             retryCount++;
-            Debug.Log($"Setting up video display on Plane (attempt {retryCount})");
+            
+            if (retryCount % 10 == 1) // 10回に1回ログ出力
+            {
+                Debug.Log($"Setting up video display on Plane (attempt {retryCount})");
+            }
             
             if (videoStreamTrack != null)
             {
-                // テクスチャの状態をログ出力
                 var videoTexture = videoStreamTrack.Texture;
-                Debug.Log($"VideoStreamTrack.Texture: {videoTexture}");
                 
                 if (videoTexture != null)
                 {
-                    Debug.Log($"Video texture found! Size: {videoTexture.width}x{videoTexture.height}");
+                    Debug.Log($"Video texture found! Size: {videoTexture.width}x{videoTexture.height}"); // 修正: formatを削除
                     
                     if (videoMaterial != null)
                     {
                         videoMaterial.mainTexture = videoTexture;
                         videoMaterial.shader = Shader.Find("Unlit/Texture");
                         Debug.Log("Video texture applied to material successfully!");
+                        
+                        isVideoReceiving = true;
+                        Debug.Log("Video display setup completed successfully!");
+                        yield break;
                     }
-
-                    isVideoReceiving = true;
-                    Debug.Log("Video display setup completed successfully!");
-                    yield break;
-                }
-                else
-                {
-                    Debug.LogWarning($"VideoStreamTrack.Texture is null, retrying... ({retryCount}/{maxRetries})");
                 }
             }
-            else
-            {
-                Debug.LogError("VideoStreamTrack is null!");
-            }
 
-            yield return new WaitForSeconds(1.0f); // 修正: リトライ間隔を0.5秒から1秒に増加
+            yield return new WaitForSeconds(0.1f);
         }
 
-        Debug.LogError("Failed to setup video display after maximum retries");
+        if (!isVideoReceiving)
+        {
+            Debug.LogError("Failed to setup video display after maximum retries");
+        }
     }
 
     void OnGUI()
