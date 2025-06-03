@@ -58,10 +58,10 @@ public class RTSPVideoReceiver : MonoBehaviour
         Debug.Log($"Created RenderTexture: {videoRenderTexture.width}x{videoRenderTexture.height}");
     }
 
-   void Update()
+    void Update()
     {
         ws?.DispatchMessageQueue();
-        
+
         // より頻繁にテクスチャをチェック
         if (videoStreamTrack != null && !isVideoReceiving)
         {
@@ -74,11 +74,29 @@ public class RTSPVideoReceiver : MonoBehaviour
                 isVideoReceiving = true;
             }
         }
-        
+
         // デバッグ情報を定期的に出力
         if (Time.frameCount % 300 == 0 && videoStreamTrack != null && !isVideoReceiving)
         {
             Debug.Log($"Debug: VideoStreamTrack.Enabled={videoStreamTrack.Enabled}, ReadyState={videoStreamTrack.ReadyState}, Texture={videoStreamTrack.Texture}");
+        }
+        
+        if (isVideoReceiving && Time.frameCount % 300 == 0)
+        {
+            var texture = videoStreamTrack?.Texture;
+            Debug.Log($"Video Status - Receiving: {isVideoReceiving}");
+            Debug.Log($"Material Texture: {videoMaterial?.mainTexture}");
+            Debug.Log($"VideoStreamTrack Texture: {texture}");
+            Debug.Log($"RenderTexture: {videoRenderTexture} (Created: {videoRenderTexture?.IsCreated()})");
+            
+            if (texture != null)
+            {
+                Debug.Log($"StreamTrack Texture Size: {texture.width}x{texture.height}");
+            }
+            if (videoRenderTexture != null)
+            {
+                Debug.Log($"RenderTexture Size: {videoRenderTexture.width}x{videoRenderTexture.height}");
+            }
         }
     }
 
@@ -101,9 +119,32 @@ public class RTSPVideoReceiver : MonoBehaviour
 
     private void SetupVideoPlane()
     {
-        if (videoPlane == null)
+
+        if (videoPlane != null)
         {
-            Debug.LogError("Video Plane is not assigned!");
+            var renderer = videoPlane.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                videoMaterial = new Material(Shader.Find("Unlit/Texture"));
+                renderer.material = videoMaterial;
+                Debug.Log("Video material created and assigned to plane");
+
+                // Planeの詳細を確認
+                Debug.Log($"Plane position: {videoPlane.transform.position}");
+                Debug.Log($"Plane rotation: {videoPlane.transform.rotation}");
+                Debug.Log($"Plane scale: {videoPlane.transform.localScale}");
+                Debug.Log($"Renderer enabled: {renderer.enabled}");
+                Debug.Log($"GameObject active: {videoPlane.activeInHierarchy}");
+            }
+            else
+            {
+                Debug.LogError("Renderer not found on video plane!");
+
+            }
+        }
+        else
+        {
+            Debug.LogError("Video plane is not assigned!");
             return;
         }
 
