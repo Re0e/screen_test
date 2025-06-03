@@ -119,45 +119,31 @@ public class RTSPVideoReceiver : MonoBehaviour
 
     private void SetupVideoPlane()
     {
-
         if (videoPlane != null)
         {
-            var renderer = videoPlane.GetComponent<Renderer>();
-            if (renderer != null)
+            var planeRenderer = videoPlane.GetComponent<Renderer>(); // 修正: 変数名を planeRenderer に変更
+            if (planeRenderer != null)
             {
                 videoMaterial = new Material(Shader.Find("Unlit/Texture"));
-                renderer.material = videoMaterial;
+                planeRenderer.material = videoMaterial;
                 Debug.Log("Video material created and assigned to plane");
 
                 // Planeの詳細を確認
                 Debug.Log($"Plane position: {videoPlane.transform.position}");
                 Debug.Log($"Plane rotation: {videoPlane.transform.rotation}");
                 Debug.Log($"Plane scale: {videoPlane.transform.localScale}");
-                Debug.Log($"Renderer enabled: {renderer.enabled}");
+                Debug.Log($"Renderer enabled: {planeRenderer.enabled}");
                 Debug.Log($"GameObject active: {videoPlane.activeInHierarchy}");
             }
             else
             {
                 Debug.LogError("Renderer not found on video plane!");
-
             }
         }
         else
         {
             Debug.LogError("Video plane is not assigned!");
             return;
-        }
-
-        var renderer = videoPlane.GetComponent<Renderer>();
-        if (renderer != null)
-        {
-            videoMaterial = new Material(Shader.Find("Standard"));
-            renderer.material = videoMaterial;
-            Debug.Log("Video material created and assigned to plane");
-        }
-        else
-        {
-            Debug.LogError("Renderer not found on video plane!");
         }
     }
     
