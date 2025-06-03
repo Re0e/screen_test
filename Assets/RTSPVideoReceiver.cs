@@ -33,7 +33,6 @@ public class RTSPVideoReceiver : MonoBehaviour
     private WebSocket ws;
     private RTCPeerConnection pc;
     private VideoStreamTrack videoStreamTrack;
-    private VideoStreamTrack dummyVideoTrack;
     private Material videoMaterial;
     private bool isVideoReceiving = false;
 
@@ -136,22 +135,15 @@ public class RTSPVideoReceiver : MonoBehaviour
         pc = new RTCPeerConnection(ref config);
         Debug.Log("PeerConnection created");
 
-        // H.264/VP8受信用のトランシーバーを明示的に作成
+        // H.264受信用のトランシーバーを作成（ダミートラック不要）
         Debug.Log("Adding video transceiver...");
         var transceiverInit = new RTCRtpTransceiverInit
         {
             direction = RTCRtpTransceiverDirection.RecvOnly
         };
         
-        // ビデオ受信用トランシーバー追加
         var transceiver = pc.AddTransceiver(TrackKind.Video, transceiverInit);
         Debug.Log("Video transceiver added");
-
-        // ダミートラックを追加（SDP生成のため）
-        Debug.Log("Creating dummy video track for SDP generation...");
-        dummyVideoTrack = Camera.main.CaptureStreamTrack(1920, 1080);
-        pc.AddTrack(dummyVideoTrack);
-        Debug.Log("Dummy video track added to generate proper SDP");
 
         pc.OnIceCandidate = candidate =>
         {
@@ -247,44 +239,44 @@ public class RTSPVideoReceiver : MonoBehaviour
         RTCConfiguration config = default;
         config.iceServers = new RTCIceServer[] {};
         
-        // 基本設定のみ（Unity WebRTC 3.0対応）
         return config;
     }
 
     private IEnumerator SetupVideoDisplay()
     {
-        yield return new WaitForSeconds(1f);
+        int retryCount = 0;
+        const int maxRetries = 20; // 最大10秒間リトライ
         
-        if (videoStreamTrack != null)
+        while (retryCount < maxRetries)
         {
-            Debug.Log("Setting up video display on Plane");
-            
-            var videoTexture = videoStreamTrack.Texture;
-            if (videoTexture != null)
+            if (videoStreamTrack != null)
             {
-                Debug.Log($"Video texture obtained: {videoTexture.width}x{videoTexture.height}");
+                Debug.Log($"Setting up video display on Plane (attempt {retryCount + 1})");
                 
-                if (videoMaterial != null)
+                var videoTexture = videoStreamTrack.Texture;
+                if (videoTexture != null)
                 {
-                    videoMaterial.mainTexture = videoTexture;
-                    videoMaterial.shader = Shader.Find("Unlit/Texture");
-                    Debug.Log("Video texture applied to plane material");
+                    Debug.Log($"Video texture obtained: {videoTexture.width}x{videoTexture.height}");
+                    
+                    if (videoMaterial != null)
+                    {
+                        videoMaterial.mainTexture = videoTexture;
+                        videoMaterial.shader = Shader.Find("Unlit/Texture");
+                        Debug.Log("Video texture applied to plane material");
+                    }
+                    
+                    isVideoReceiving = true;
+                    Debug.Log("Video stream display on Plane completed!");
+                    yield break; // 成功時は終了
                 }
-                
-                isVideoReceiving = true;
-                Debug.Log("Video stream display on Plane completed!");
             }
-            else
-            {
-                Debug.LogWarning("VideoStreamTrack.Texture is null, retrying...");
-                yield return new WaitForSeconds(0.5f);
-                StartCoroutine(SetupVideoDisplay());
-            }
+            
+            retryCount++;
+            Debug.LogWarning($"VideoStreamTrack.Texture is null, retrying... ({retryCount}/{maxRetries})");
+            yield return new WaitForSeconds(0.5f);
         }
-        else
-        {
-            Debug.LogError("VideoStreamTrack is null");
-        }
+        
+        Debug.LogError("Failed to setup video display after maximum retries");
     }
 
     private IEnumerator OnSignalingMessage(string message)
@@ -405,7 +397,6 @@ public class RTSPVideoReceiver : MonoBehaviour
             Destroy(videoMaterial);
         }
         
-        dummyVideoTrack?.Dispose();
         videoStreamTrack?.Dispose();
         pc?.Close();
         ws?.Close();
