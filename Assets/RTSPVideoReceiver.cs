@@ -107,7 +107,7 @@ public class RTSPVideoReceiver : MonoBehaviour
     private IEnumerator WaitAndSetupVideoDisplay()
     {
         // 短時間待ってからセットアップを開始
-        yield return new WaitForSeconds(1.0f);
+        yield return new WaitForSeconds(2.0f); // 修正: 待機時間を1秒から2秒に増加
         yield return StartCoroutine(SetupVideoDisplay());
     }
 
@@ -250,7 +250,7 @@ public class RTSPVideoReceiver : MonoBehaviour
     private IEnumerator SetupVideoDisplay()
     {
         int retryCount = 0;
-        const int maxRetries = 20;
+        const int maxRetries = 30; // 修正: 最大リトライ回数を20から30に増加
         
         Debug.Log($"Starting SetupVideoDisplay - VideoStreamTrack: {videoStreamTrack != null}");
 
@@ -290,7 +290,7 @@ public class RTSPVideoReceiver : MonoBehaviour
                 Debug.LogError("VideoStreamTrack is null!");
             }
 
-            yield return new WaitForSeconds(0.5f);
+            yield return new WaitForSeconds(1.0f); // 修正: リトライ間隔を0.5秒から1秒に増加
         }
 
         Debug.LogError("Failed to setup video display after maximum retries");
