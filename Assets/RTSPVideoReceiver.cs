@@ -36,16 +36,26 @@ public class RTSPVideoReceiver : MonoBehaviour
     private VideoStreamTrack videoStreamTrack;
     private Material videoMaterial;
     private bool isVideoReceiving = false;
-
-    void Start()
+    private RenderTexture videoRenderTexture;
+    private void Start()
     {
         Debug.Log("Start RTSP Video Receiver Setup with H.264 support");
         
-        // H.264コーデックサポート確認
-        CheckH264Support();
+        // 事前にRenderTextureを作成
+        CreateVideoRenderTexture();
         
+        CheckH264Support();
         SetupVideoPlane();
         StartCoroutine(SetupConnection());
+    }
+
+    private void CreateVideoRenderTexture()
+    {
+        // H.264用のRenderTextureを作成
+        videoRenderTexture = new RenderTexture(1920, 1080, 0, RenderTextureFormat.BGRA32);
+        videoRenderTexture.name = "VideoStreamTexture";
+        videoRenderTexture.Create();
+        Debug.Log($"Created RenderTexture: {videoRenderTexture.width}x{videoRenderTexture.height}");
     }
 
    void Update()
@@ -121,16 +131,20 @@ public class RTSPVideoReceiver : MonoBehaviour
     {
         Debug.Log("Starting video texture monitoring...");
         
-        while (!isVideoReceiving && videoStreamTrack != null)
+        int frameCount = 0;
+        while (!isVideoReceiving && videoStreamTrack != null && frameCount < 1000)
         {
+            frameCount++;
+            
+            // VideoStreamTrackのTextureをチェック
             var texture = videoStreamTrack.Texture;
             if (texture != null)
             {
-                Debug.Log($"Texture detected in monitor! Size: {texture.width}x{texture.height}"); // 修正: formatを削除
+                Debug.Log($"New texture detected! Size: {texture.width}x{texture.height}");
                 
                 if (videoMaterial != null)
                 {
-                    videoMaterial.mainTexture = texture;
+                    videoMaterial.mainTexture = texture; // 修正: RenderTextureの割り当てを削除
                     videoMaterial.shader = Shader.Find("Unlit/Texture");
                     isVideoReceiving = true;
                     Debug.Log("Video texture applied successfully in monitor!");
@@ -138,8 +152,19 @@ public class RTSPVideoReceiver : MonoBehaviour
                 yield break;
             }
             
+            // RenderTextureの状態をチェック
+            if (videoRenderTexture != null && videoRenderTexture.IsCreated())
+            {
+                if (frameCount % 100 == 0)
+                {
+                    Debug.Log($"RenderTexture status: Created={videoRenderTexture.IsCreated()}, Active={RenderTexture.active == videoRenderTexture}");
+                }
+            }
+            
             yield return new WaitForSeconds(0.1f);
         }
+        
+        Debug.Log($"Video texture monitoring ended after {frameCount} frames");
     }
 
     private IEnumerator SetupConnection()
@@ -180,21 +205,27 @@ public class RTSPVideoReceiver : MonoBehaviour
         pc.OnTrack = (RTCTrackEvent trackEvent) =>
         {
             Debug.Log($"Track received - Kind: {trackEvent.Track.Kind}, ID: {trackEvent.Track.Id}");
-
+            
             if (trackEvent.Track.Kind == TrackKind.Video)
             {
                 videoStreamTrack = trackEvent.Track as VideoStreamTrack;
                 Debug.Log("Video track received! Setting up video display...");
-
+                
                 if (videoStreamTrack != null)
                 {
                     Debug.Log($"VideoStreamTrack details - Enabled: {videoStreamTrack.Enabled}, ReadyState: {videoStreamTrack.ReadyState}");
-
-                    // テクスチャの更新を監視するコルーチンを開始
+                    
+                    // RenderTextureを直接適用せず、VideoStreamTrackのTextureを利用
+                    if (videoMaterial != null && videoRenderTexture != null)
+                    {
+                        videoMaterial.mainTexture = videoRenderTexture; // 修正: RenderTextureを直接適用
+                        videoMaterial.shader = Shader.Find("Unlit/Texture");
+                        isVideoReceiving = true;
+                        Debug.Log("Video texture applied to material immediately!");
+                    }
+                    
+                    // モニタリングも継続
                     StartCoroutine(MonitorVideoTexture());
-
-                    // 少し遅延してからセットアップを開始
-                    StartCoroutine(WaitAndSetupVideoDisplay());
                 }
             }
         };
