@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Linq; // 修正: System.Linqを追加
 using UnityEngine;
 using NativeWebSocket;
 using Unity.WebRTC;
@@ -50,31 +51,16 @@ public class RTSPVideoReceiver : MonoBehaviour
     private void CheckH264Support()
     {
         Debug.Log("Checking H.264 support...");
-        
         try
         {
-            // 利用可能なコーデックを確認
             var capabilities = RTCRtpSender.GetCapabilities(TrackKind.Video);
-            if (capabilities != null && capabilities.codecs != null)
+            if (capabilities?.codecs != null)
             {
-                Debug.Log($"Available video codecs count: {capabilities.codecs.Length}");
-                bool h264Found = false;
-                foreach (var codec in capabilities.codecs)
-                {
-                    Debug.Log($"Available codec: {codec.mimeType}");
-                    if (codec.mimeType.Contains("H264") || codec.mimeType.Contains("h264"))
-                    {
-                        Debug.Log("SUCCESS: H.264 codec is available!");
-                        h264Found = true;
-                    }
-                }
-                if (!h264Found)
-                {
-                    Debug.LogWarning("H.264 codec not found - will use VP8/VP9");
-                }
+                bool h264Found = capabilities.codecs.Any(codec => codec.mimeType.Contains("H264", StringComparison.OrdinalIgnoreCase)); // 修正: System.LinqのAnyを使用
+                Debug.Log(h264Found ? "SUCCESS: H.264 codec is available!" : "H.264 codec not found - will use VP8/VP9");
             }
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             Debug.LogError("Failed to check codec capabilities: " + ex.Message);
         }
@@ -360,6 +346,7 @@ public class RTSPVideoReceiver : MonoBehaviour
     {
         bool connected = false;
         ws.OnOpen += () => { connected = true; };
+        ws.OnError += (e) => { Debug.LogError("WebSocket connection error: " + e); };
 
         Debug.Log("Connecting WebSocket...");
         ws.Connect();
@@ -374,6 +361,7 @@ public class RTSPVideoReceiver : MonoBehaviour
         if (!connected)
         {
             Debug.LogError("WebSocket connection timed out.");
+            ws.Close();
         }
         else
         {
@@ -399,26 +387,27 @@ public class RTSPVideoReceiver : MonoBehaviour
         
         videoStreamTrack?.Dispose();
         pc?.Close();
-        ws?.Close();
+
+        if (ws != null)
+        {
+            ws.OnOpen -= () => { }; // 修正: イベントリスナー解除
+            ws.OnError -= (e) => { };
+            ws.OnClose -= (e) => { };
+            ws.OnMessage -= (bytes) => { };
+            ws.Close();
+        }
     }
 
     void OnGUI()
     {
         GUILayout.BeginArea(new Rect(10, 10, 350, 150));
-        GUILayout.Label($"WebSocket: {(ws?.State.ToString() ?? "None")}");
-        GUILayout.Label($"PeerConnection: {(pc?.ConnectionState.ToString() ?? "None")}");
+        GUILayout.Label($"WebSocket State: {(ws?.State.ToString() ?? "None")}");
+        GUILayout.Label($"PeerConnection State: {(pc?.ConnectionState.ToString() ?? "None")}");
         GUILayout.Label($"Video Receiving: {isVideoReceiving}");
-        
-        if (videoStreamTrack != null && videoStreamTrack.Texture != null)
+        if (videoStreamTrack?.Texture != null)
         {
             GUILayout.Label($"Video Texture: {videoStreamTrack.Texture.width}x{videoStreamTrack.Texture.height}");
         }
-        
-        if (videoPlane != null)
-        {
-            GUILayout.Label($"Video Plane: {videoPlane.name}");
-        }
-        
         GUILayout.EndArea();
     }
 }
