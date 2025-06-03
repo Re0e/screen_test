@@ -48,6 +48,24 @@ public class RTSPVideoReceiver : MonoBehaviour
         StartCoroutine(SetupConnection());
     }
 
+    void Update()
+    {
+        ws?.DispatchMessageQueue();
+        
+        // ビデオテクスチャの更新を強制的にチェック
+        if (videoStreamTrack != null && !isVideoReceiving)
+        {
+            var texture = videoStreamTrack.Texture;
+            if (texture != null && videoMaterial != null && videoMaterial.mainTexture == null)
+            {
+                Debug.Log("Late texture detection - applying now!");
+                videoMaterial.mainTexture = texture;
+                videoMaterial.shader = Shader.Find("Unlit/Texture");
+                isVideoReceiving = true;
+            }
+        }
+    }
+
     private void CheckH264Support()
     {
         try
@@ -84,6 +102,13 @@ public class RTSPVideoReceiver : MonoBehaviour
         {
             Debug.LogError("Renderer not found on video plane!");
         }
+    }
+    
+    private IEnumerator WaitAndSetupVideoDisplay()
+    {
+        // 短時間待ってからセットアップを開始
+        yield return new WaitForSeconds(1.0f);
+        yield return StartCoroutine(SetupVideoDisplay());
     }
 
     private IEnumerator SetupConnection()
@@ -123,12 +148,19 @@ public class RTSPVideoReceiver : MonoBehaviour
 
         pc.OnTrack = (RTCTrackEvent trackEvent) =>
         {
+            Debug.Log($"Track received - Kind: {trackEvent.Track.Kind}, ID: {trackEvent.Track.Id}");
+            
             if (trackEvent.Track.Kind == TrackKind.Video)
             {
                 videoStreamTrack = trackEvent.Track as VideoStreamTrack;
+                Debug.Log("Video track received! Setting up video display...");
+                
                 if (videoStreamTrack != null)
                 {
-                    StartCoroutine(SetupVideoDisplay());
+                    Debug.Log($"VideoStreamTrack details - Enabled: {videoStreamTrack.Enabled}, ReadyState: {videoStreamTrack.ReadyState}");
+                    
+                    // テクスチャの更新を待つために少し遅延を追加
+                    StartCoroutine(WaitAndSetupVideoDisplay());
                 }
             }
         };
@@ -219,30 +251,49 @@ public class RTSPVideoReceiver : MonoBehaviour
     {
         int retryCount = 0;
         const int maxRetries = 20;
+        
+        Debug.Log($"Starting SetupVideoDisplay - VideoStreamTrack: {videoStreamTrack != null}");
 
         while (retryCount < maxRetries)
         {
+            retryCount++;
+            Debug.Log($"Setting up video display on Plane (attempt {retryCount})");
+            
             if (videoStreamTrack != null)
             {
+                // テクスチャの状態をログ出力
                 var videoTexture = videoStreamTrack.Texture;
+                Debug.Log($"VideoStreamTrack.Texture: {videoTexture}");
+                
                 if (videoTexture != null)
                 {
+                    Debug.Log($"Video texture found! Size: {videoTexture.width}x{videoTexture.height}");
+                    
                     if (videoMaterial != null)
                     {
                         videoMaterial.mainTexture = videoTexture;
                         videoMaterial.shader = Shader.Find("Unlit/Texture");
+                        Debug.Log("Video texture applied to material successfully!");
                     }
 
-                    isVideoReceiving = true; // 修正: フィールドを使用
+                    isVideoReceiving = true;
+                    Debug.Log("Video display setup completed successfully!");
                     yield break;
                 }
+                else
+                {
+                    Debug.LogWarning($"VideoStreamTrack.Texture is null, retrying... ({retryCount}/{maxRetries})");
+                }
+            }
+            else
+            {
+                Debug.LogError("VideoStreamTrack is null!");
             }
 
-            retryCount++;
             yield return new WaitForSeconds(0.5f);
         }
 
-        Debug.LogError("Failed to setup video display after maximum retries.");
+        Debug.LogError("Failed to setup video display after maximum retries");
     }
 
     void OnGUI()
